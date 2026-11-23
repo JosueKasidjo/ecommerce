@@ -35,6 +35,7 @@ $totalTTC = $totalHT + $montantTVA;
 <!DOCTYPE html>
 <html lang="fr">
 <head>
+    <link rel="stylesheet" href="scrollbar.css">
 <meta charset="UTF-8">
 <title>Facture <?= h($commande['numero_commande']) ?> | NEXIA</title>
 <script src="https://cdn.tailwindcss.com"></script>
