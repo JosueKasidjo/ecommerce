@@ -94,6 +94,7 @@ try {
         id INT AUTO_INCREMENT PRIMARY KEY,
         numero_commande VARCHAR(50) NOT NULL UNIQUE,
         client_id INT NOT NULL,
+        succursale_id INT NULL,
         date_commande TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         montant_total DECIMAL(12,2) NOT NULL DEFAULT 0,
         statut ENUM(
@@ -147,6 +148,7 @@ try {
     $tables[] = "CREATE TABLE IF NOT EXISTS mouvements_stock (
         id INT AUTO_INCREMENT PRIMARY KEY,
         produit_id INT NOT NULL,
+        succursale_id INT NULL,
         utilisateur_id INT NULL,
         type_mouvement ENUM('Entree','Sortie','Ajustement') NOT NULL,
         quantite INT NOT NULL,
@@ -162,6 +164,21 @@ try {
 
     foreach ($tables as $sql) {
         $pdo->exec($sql);
+    }
+
+    // Ajouter les colonnes de succursale aux bases déjà installées.
+    foreach (['commandes', 'mouvements_stock'] as $table) {
+        $verification = $pdo->prepare("
+            SELECT COUNT(*)
+            FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME = ?
+              AND COLUMN_NAME = 'succursale_id'
+        ");
+        $verification->execute([$table]);
+        if ((int)$verification->fetchColumn() === 0) {
+            $pdo->exec("ALTER TABLE `$table` ADD COLUMN succursale_id INT NULL");
+        }
     }
 
     $message = "La base de données « ecommerce » et ses 9 tables ont été créées avec succès.";

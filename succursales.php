@@ -177,8 +177,8 @@ $succursales = $pdo->query("
                                     <td class="px-5 py-4">
                                         <div class="flex items-center justify-end gap-2">
                                             <a href="succursales.php?modifier=<?= (int)$s['id'] ?>" class="rounded-lg bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-100">Modifier</a>
-                                            <form method="POST" onsubmit="return confirm('Changer le statut ?');"><input type="hidden" name="action" value="changer_statut"><input type="hidden" name="id" value="<?= (int)$s['id'] ?>"><button class="rounded-lg bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700 hover:bg-amber-100">Statut</button></form>
-                                            <form method="POST" onsubmit="return confirm('Supprimer cette succursale ?');"><input type="hidden" name="action" value="supprimer"><input type="hidden" name="id" value="<?= (int)$s['id'] ?>"><button class="rounded-lg bg-red-50 px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-100">Supprimer</button></form>
+                                            <form method="POST" data-confirm="Voulez-vous vraiment changer le statut de cette succursale ?" data-confirm-title="Modifier le statut"><input type="hidden" name="action" value="changer_statut"><input type="hidden" name="id" value="<?= (int)$s['id'] ?>"><button class="rounded-lg bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700 hover:bg-amber-100">Statut</button></form>
+                                            <form method="POST" data-confirm="Supprimer cette succursale ?" data-confirm-title="Supprimer cette succursale" data-confirm-label="Supprimer" data-confirm-variant="danger"><input type="hidden" name="action" value="supprimer"><input type="hidden" name="id" value="<?= (int)$s['id'] ?>"><button class="rounded-lg bg-red-50 px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-100">Supprimer</button></form>
                                         </div>
                                     </td>
                                 </tr>
@@ -191,5 +191,6 @@ $succursales = $pdo->query("
         </div>
     </main>
 </div>
+<?php include __DIR__ . '/_notifications.php'; ?>
 </body>
 </html>

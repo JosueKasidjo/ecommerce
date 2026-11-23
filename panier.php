@@ -406,17 +406,16 @@ if (!empty($_SESSION['panier'])) {
                 </form>
 
                 <!-- FORMULAIRE DE SUPPRESSION -->
-                <form id="formSuppression" method="POST" action="panier.php" class="hidden">
+                <form id="formSuppression" method="POST" action="panier.php" class="hidden" data-confirm="Voulez-vous retirer ce produit du panier ?" data-confirm-title="Retirer ce produit" data-confirm-label="Retirer" data-confirm-variant="danger">
                     <input type="hidden" name="action" value="supprimer">
                     <input type="hidden" name="produit_id" id="idSuppression">
                 </form>
 
                 <!-- VIDER LE PANIER -->
-                <form method="POST" action="panier.php" class="mt-4">
+                <form method="POST" action="panier.php" class="mt-4" data-confirm="Voulez-vous vraiment vider votre panier ?" data-confirm-title="Vider le panier" data-confirm-label="Vider le panier" data-confirm-variant="danger">
                     <input type="hidden" name="action" value="vider">
 
                     <button type="submit"
-                            onclick="return confirm('Voulez-vous vraiment vider votre panier ?')"
                             class="text-red-600 hover:text-red-800 text-sm font-semibold">
                         Vider complètement le panier
                     </button>
@@ -505,12 +504,13 @@ if (!empty($_SESSION['panier'])) {
 
 <script>
 function supprimerProduit(id) {
-    if (confirm("Voulez-vous retirer ce produit du panier ?")) {
-        document.getElementById("idSuppression").value = id;
-        document.getElementById("formSuppression").submit();
-    }
+    document.getElementById("idSuppression").value = id;
+    const form = document.getElementById("formSuppression");
+    if (typeof form.requestSubmit === "function") form.requestSubmit();
+    else form.submit();
 }
 </script>
 
+<?php include __DIR__ . '/_notifications.php'; ?>
 </body>
 </html>

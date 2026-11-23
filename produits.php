@@ -620,12 +620,12 @@ if (isset($_SESSION["produits_message"])) {
                                             <td class="px-5 py-4">
                                                 <div class="flex items-center justify-end gap-2">
                                                     <a href="produits.php?modifier=<?= (int) $produit["id"] ?>#formulaire-produit" class="rounded-lg bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700 transition hover:bg-blue-100">Modifier</a>
-                                                    <form method="POST" action="produits.php" onsubmit="return confirm('Voulez-vous changer le statut de ce produit ?');">
+                                                    <form method="POST" action="produits.php" data-confirm="Voulez-vous changer le statut de ce produit ?" data-confirm-title="Modifier le statut">
                                                         <input type="hidden" name="action" value="changer_statut">
                                                         <input type="hidden" name="id" value="<?= (int) $produit["id"] ?>">
                                                         <button type="submit" class="rounded-lg bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700 transition hover:bg-amber-100">Statut</button>
                                                     </form>
-                                                    <form method="POST" action="produits.php" onsubmit="return confirm('Confirmer la suppression de ce produit ?');">
+                                                    <form method="POST" action="produits.php" data-confirm="Confirmer la suppression de ce produit ?" data-confirm-title="Supprimer ce produit" data-confirm-label="Supprimer" data-confirm-variant="danger">
                                                         <input type="hidden" name="action" value="supprimer">
                                                         <input type="hidden" name="id" value="<?= (int) $produit["id"] ?>">
                                                         <button type="submit" class="rounded-lg bg-red-50 px-3 py-2 text-xs font-semibold text-red-700 transition hover:bg-red-100">Supprimer</button>
@@ -643,5 +643,6 @@ if (isset($_SESSION["produits_message"])) {
         </div>
     </main>
 </div>
+<?php include __DIR__ . '/_notifications.php'; ?>
 </body>
 </html>

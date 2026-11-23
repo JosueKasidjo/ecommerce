@@ -539,7 +539,7 @@ if (!function_exists("h")) {
                 Le paiement sera effectué dans une étape ultérieure.
             </div>
 
-            <form method="POST" class="mt-7">
+            <form method="POST" class="mt-7" data-confirm="Voulez-vous vraiment confirmer cette commande ?" data-confirm-title="Confirmer la commande" data-confirm-label="Confirmer la commande">
 
                 <input type="hidden"
                        name="csrf_token"
@@ -548,7 +548,6 @@ if (!function_exists("h")) {
                 <button
                     type="submit"
                     <?= $erreur ? "disabled" : "" ?>
-                    onclick="return confirm('Voulez-vous vraiment confirmer cette commande ?')"
                     class="w-full py-4 rounded-xl font-bold text-white
                     <?= $erreur
                         ? 'bg-gray-400 cursor-not-allowed'
@@ -569,5 +568,6 @@ if (!function_exists("h")) {
 
 </main>
 
+<?php include __DIR__ . '/_notifications.php'; ?>
 </body>
 </html>

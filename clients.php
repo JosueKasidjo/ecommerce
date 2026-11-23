@@ -228,7 +228,7 @@ try {
                                     <td class="whitespace-nowrap px-5 py-4 text-xs text-slate-500"><?= $c["date_creation"] ? h(date("d/m/Y", strtotime($c["date_creation"]))) : "—" ?></td>
                                     <td class="px-5 py-4"><div class="flex items-center gap-2">
                                         <a href="client.php?modifier=<?= (int)$c["id"] ?>" class="rounded-lg bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700 hover:bg-amber-100">Modifier</a>
-                                        <form method="POST" onsubmit="return confirm('Voulez-vous vraiment supprimer ce client ?');"><input type="hidden" name="action" value="supprimer"><input type="hidden" name="id" value="<?= (int)$c["id"] ?>"><button type="submit" class="rounded-lg bg-red-50 px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-100">Supprimer</button></form>
+                                        <form method="POST" data-confirm="Voulez-vous vraiment supprimer ce client ?" data-confirm-title="Supprimer ce client" data-confirm-label="Supprimer" data-confirm-variant="danger"><input type="hidden" name="action" value="supprimer"><input type="hidden" name="id" value="<?= (int)$c["id"] ?>"><button type="submit" class="rounded-lg bg-red-50 px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-100">Supprimer</button></form>
                                     </div></td>
                                 </tr>
                             <?php endforeach; endif; ?>
@@ -240,5 +240,6 @@ try {
         </div>
     </main>
 </div>
+<?php include __DIR__ . '/_notifications.php'; ?>
 </body>
 </html>

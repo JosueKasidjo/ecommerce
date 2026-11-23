@@ -30,7 +30,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'vendr
     $succId     = (int)($_POST['succursale_id'] ?? 0);
     $clientNom  = trim($_POST['client_nom'] ?? '');
     $clientTel  = trim($_POST['client_telephone'] ?? '');
-    $methode    = $_POST['methode_paiement'] ?? 'Espece';
+    $methode    = $_POST['methode_paiement'] ?? 'Especes';
     $panierJson = $_POST['panier_json'] ?? '[]';
     $panier     = json_decode($panierJson, true);
 
@@ -145,7 +145,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'vendr
 
             // 5) Paiement
             $pdo->prepare("
-                INSERT INTO paiements (commande_id, montant, methode, statut, date_paiement)
+                INSERT INTO paiements (commande_id, montant, mode_paiement, statut, date_paiement)
                 VALUES (?, ?, ?, 'Valide', NOW())
             ")->execute([$commandeId, $total, $methode]);
 
@@ -164,15 +164,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'vendr
 // ============================================================
 // DONNÉES POUR L'INTERFACE
 // ============================================================
-$produits = $pdo->query("
-    SELECT p.id, p.nom_produit, p.prix_vente,
-           COALESCE(s.quantite, 0) AS stock_general,
-           (SELECT COALESCE(SUM(ss.quantite),0) FROM stocks_succursales ss WHERE ss.produit_id = p.id) AS stock_succursales
+$stmtProduits = $pdo->prepare("
+    SELECT p.id, p.nom_produit, p.prix_vente
     FROM produits p
-    LEFT JOIN stocks s ON s.produit_id = p.id
     WHERE p.statut = 'Disponible'
     ORDER BY p.nom_produit
-")->fetchAll();
+");
+$stmtProduits->execute();
+$produits = $stmtProduits->fetchAll();
 
 // Stock par succursale pour le JS (filtre dynamique)
 $stockParSucc = [];
@@ -240,7 +239,7 @@ $ventesRecentes = $pdo->query("
                     <?php if ($derniereCommandeId): ?>
                         <a href="facture.php?id=<?= (int)$derniereCommandeId ?>" target="_blank"
                            class="rounded-lg bg-green-700 px-3 py-2 text-xs font-bold text-white hover:bg-green-800">
-                            🖨 Imprimer la facture
+                            Imprimer la facture
                         </a>
                     <?php endif; ?>
                 </div>
@@ -279,6 +278,9 @@ $ventesRecentes = $pdo->query("
                             <p class="mt-1 text-xs text-slate-400">Cliquez sur un produit pour l'ajouter au panier</p>
                         </div>
                         <div id="grilleProduits" class="grid grid-cols-1 gap-2 p-4 sm:grid-cols-2 lg:grid-cols-3 max-h-[500px] overflow-y-auto">
+                            <?php if (empty($produits)): ?>
+                                <p id="aucunProduitPoint" class="col-span-full py-10 text-center text-sm text-slate-400">Aucun produit disponible dans ce point de vente.</p>
+                            <?php endif; ?>
                             <?php foreach ($produits as $p): ?>
                                 <button type="button"
                                         data-id="<?= (int)$p['id'] ?>"
@@ -331,7 +333,7 @@ $ventesRecentes = $pdo->query("
                         <div>
                             <label class="mb-1 block text-xs font-semibold text-slate-500">Méthode de paiement</label>
                             <select name="methode_paiement" class="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm">
-                                <option value="Espece">Espèces</option>
+                                <option value="Especes">Espèces</option>
                                 <option value="Mobile Money">Mobile Money</option>
                                 <option value="Carte">Carte</option>
                                 <option value="Virement">Virement</option>
@@ -391,7 +393,7 @@ $ventesRecentes = $pdo->query("
                                 <td class="px-5 py-4 text-xs text-slate-500"><?= h(date('d/m/Y H:i', strtotime($v['date_commande']))) ?></td>
                                 <td class="px-5 py-4 text-right">
                                     <a href="facture.php?id=<?= (int)$v['id'] ?>" target="_blank"
-                                       class="rounded-lg bg-slate-900 px-3 py-2 text-xs font-bold text-white hover:bg-slate-700">🖨 Facture</a>
+                                       class="rounded-lg bg-slate-900 px-3 py-2 text-xs font-bold text-white hover:bg-slate-700">Facture</a>
                                 </td>
                             </tr>
                         <?php endforeach; endif; ?>
@@ -402,6 +404,8 @@ $ventesRecentes = $pdo->query("
         </div>
     </main>
 </div>
+
+<?php include __DIR__ . '/_notifications.php'; ?>
 
 <script>
 // Stock par succursale (injecté depuis PHP)
@@ -417,6 +421,7 @@ function getStock(produitId, succId) {
 
 function onSuccursaleChange() {
     const succ = parseInt(document.getElementById('selectSucc').value);
+    let produitsVisibles = 0;
     document.getElementById('succursaleIdForm').value = succ;
     document.querySelectorAll('#grilleProduits button').forEach(btn => {
         const pid = parseInt(btn.dataset.id);
@@ -426,11 +431,23 @@ function onSuccursaleChange() {
         info.className = 'shrink-0 text-right text-[10px] stock-info ' + (dispo <= 0 ? 'text-red-500' : 'text-slate-400');
         btn.disabled = dispo <= 0;
         btn.hidden = dispo <= 0;
+        btn.style.display = dispo > 0 ? '' : 'none';
+        if (dispo > 0) produitsVisibles++;
         btn.classList.toggle('opacity-40', dispo <= 0);
         btn.classList.toggle('cursor-not-allowed', dispo <= 0);
     });
     // Revalider le panier (quantités éventuellement supérieures au stock)
     panier = panier.filter(l => l.quantite <= getStock(l.produit_id, succ));
+    let messageVide = document.getElementById('aucunProduitPoint');
+    if (!messageVide) {
+        messageVide = document.createElement('p');
+        messageVide.id = 'aucunProduitPoint';
+        messageVide.className = 'col-span-full py-10 text-center text-sm text-slate-400';
+        messageVide.textContent = 'Aucun produit disponible dans ce point de vente.';
+        document.getElementById('grilleProduits').appendChild(messageVide);
+    }
+    messageVide.hidden = produitsVisibles > 0;
+
     if (panier.length > 0) {
         // Ajuster les quantités trop élevées
         panier.forEach(l => {
@@ -446,11 +463,11 @@ function ajouterAuPanier(btn) {
     const succ = parseInt(document.getElementById('selectSucc').value);
     const pid = parseInt(btn.dataset.id);
     const dispo = getStock(pid, succ);
-    if (dispo <= 0) { alert('Stock épuisé dans ce point de vente.'); return; }
+    if (dispo <= 0) { window.notifier('Ce produit est en rupture de stock dans ce point de vente.', 'warning'); return; }
 
     const existing = panier.find(l => l.produit_id === pid);
     if (existing) {
-        if (existing.quantite + 1 > dispo) { alert('Stock maximum atteint (' + dispo + ').'); return; }
+        if (existing.quantite + 1 > dispo) { window.notifier('Stock maximum atteint : ' + dispo + ' unité(s) disponible(s).', 'warning'); return; }
         existing.quantite++;
     } else {
         panier.push({
@@ -475,15 +492,18 @@ function changerQte(pid, delta) {
     const max = getStock(pid, succ);
     const nv = l.quantite + delta;
     if (nv <= 0) { retirerDuPanier(pid); return; }
-    if (nv > max) { alert('Stock maximum atteint (' + max + ').'); return; }
+    if (nv > max) { window.notifier('Stock maximum atteint : ' + max + ' unité(s) disponible(s).', 'warning'); return; }
     l.quantite = nv;
     renderPanier();
 }
 
 function viderPanier() {
-    if (!confirm('Vider le panier ?')) return;
-    panier = [];
-    renderPanier();
+    if (panier.length === 0) return;
+    window.confirmer('Tous les articles ajoutés seront supprimés de cette vente.', () => {
+        panier = [];
+        renderPanier();
+        window.notifier('Le panier a été vidé.', 'success');
+    }, { title: 'Vider le panier', confirmLabel: 'Vider le panier', variant: 'danger' });
 }
 
 function renderPanier() {
@@ -526,14 +546,23 @@ function escapeHtml(s) {
 
 function filtrerProduits() {
     const q = document.getElementById('rechercheProduit').value.toLowerCase();
+    const succ = parseInt(document.getElementById('selectSucc').value);
+    let visibles = 0;
     document.querySelectorAll('#grilleProduits button').forEach(btn => {
-        const nom = btn.dataset.nom.toLowerCase();
-        btn.style.display = nom.includes(q) ? '' : 'none';
+        const pid = parseInt(btn.dataset.id);
+        const disponible = getStock(pid, succ) > 0;
+        const correspond = btn.dataset.nom.toLowerCase().includes(q);
+        btn.hidden = !disponible || !correspond;
+        btn.style.display = disponible && correspond ? '' : 'none';
+        if (disponible && correspond) visibles++;
     });
+
+    const messageVide = document.getElementById('aucunProduitPoint');
+    if (messageVide) messageVide.hidden = visibles > 0;
 }
 
 document.getElementById('formVente').addEventListener('submit', function(e) {
-    if (panier.length === 0) { e.preventDefault(); alert('Panier vide.'); return; }
+    if (panier.length === 0) { e.preventDefault(); window.notifier('Ajoutez au moins un produit avant de valider la vente.', 'warning'); return; }
     document.getElementById('panierJson').value = JSON.stringify(panier);
 });
 
