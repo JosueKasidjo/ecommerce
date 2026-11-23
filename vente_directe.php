@@ -168,7 +168,8 @@ $stmtProduits = $pdo->prepare("
     SELECT p.id, p.nom_produit, p.prix_vente
     FROM produits p
     WHERE p.statut = 'Disponible'
-    ORDER BY p.nom_produit
+    ORDER BY p.id DESC
+    LIMIT 5
 ");
 $stmtProduits->execute();
 $produits = $stmtProduits->fetchAll();

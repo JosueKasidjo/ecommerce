@@ -12,6 +12,28 @@ $classesLienNav = static function (string $fichier) use ($pageCourante): string 
         : $base . ' text-green-100 hover:bg-white/10';
 };
 ?>
+<style>
+    @media (min-width: 768px) {
+        html,
+        body {
+            height: 100%;
+        }
+
+        body {
+            overflow: hidden;
+        }
+
+        body > .min-h-screen {
+            height: 100vh;
+        }
+
+        main {
+            height: 100vh;
+            overflow-y: auto;
+            overscroll-behavior-y: contain;
+        }
+    }
+</style>
 <aside class="w-full bg-green-950 text-white md:fixed md:inset-y-0 md:left-0 md:flex md:w-64 md:flex-col">
     <div class="flex items-center gap-3 border-b border-white/10 px-6 py-5">
         <div class="flex h-11 w-11 items-center justify-center rounded-xl bg-green-500 text-xl font-black">E</div>

@@ -352,7 +352,8 @@ try {
          FROM produits p
          INNER JOIN categories c ON c.id = p.categorie_id
          LEFT JOIN stocks s ON s.produit_id = p.id
-         ORDER BY p.id DESC"
+         ORDER BY p.id DESC
+         LIMIT 5"
     );
     $produits = $stmtProduits->fetchAll();
 
@@ -561,7 +562,7 @@ if (isset($_SESSION["produits_message"])) {
                             <h3 class="font-bold text-slate-900">Liste des produits</h3>
                             <p class="mt-1 text-xs text-slate-400">Produits enregistrés dans votre boutique</p>
                         </div>
-                        <span class="w-fit rounded-lg bg-green-50 px-3 py-1.5 text-xs font-semibold text-green-700"><?= count($produits) ?> produit(s)</span>
+                        <span class="w-fit rounded-lg bg-green-50 px-3 py-1.5 text-xs font-semibold text-green-700"><?= count($produits) ?> dernier(s) produit(s)</span>
                     </div>
 
                     <div class="overflow-x-auto">
