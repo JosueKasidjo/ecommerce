@@ -11,6 +11,7 @@ $erreur = ''; $message = ''; $derniereCommandeId = 0;
 
 // --- Succursales actives ---
 $succursales = $pdo->query("SELECT id, nom, code, type FROM succursales WHERE statut='Active' ORDER BY type='CENTRALE' DESC, nom")->fetchAll();
+$idsSuccursalesActives = array_map('intval', array_column($succursales, 'id'));
 $succursaleDefaut = (int)parametre('succursale_par_defaut', 1);
 if (!array_filter($succursales, fn($s) => (int)$s['id'] === $succursaleDefaut)) {
     $succursaleDefaut = (int)($succursales[0]['id'] ?? 0);
@@ -34,7 +35,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'vendr
     $panierJson = $_POST['panier_json'] ?? '[]';
     $panier     = json_decode($panierJson, true);
 
-    if ($succId <= 0) {
+    if ($succId <= 0 || !in_array($succId, $idsSuccursalesActives, true)) {
         $erreur = "Veuillez choisir un point de vente.";
     } elseif (!is_array($panier) || empty($panier)) {
         $erreur = "Le panier est vide. Ajoutez au moins un produit.";
@@ -76,7 +77,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'vendr
                 $stmt = $pdo->prepare("SELECT id, nom_produit, prix_vente FROM produits WHERE id = ? AND statut='Disponible'");
                 $stmt->execute([$pid]);
                 $prod = $stmt->fetch();
-                if (!$prod) throw new RuntimeException("Produit #$pid introuvable ou inactif.");
+                if (!$prod) throw new RuntimeException("Produit introuvable ou inactif.");
 
                 // Vérifier le stock au bon endroit
                 if ($succId === $succursaleCentraleId) {
@@ -123,11 +124,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'vendr
                 INSERT INTO details_commande (commande_id, produit_id, quantite, prix_unitaire, sous_total)
                 VALUES (?, ?, ?, ?, ?)
             ");
-            $stmtDecrGen = $pdo->prepare("UPDATE stocks SET quantite = quantite - ? WHERE produit_id = ?");
-            $stmtDecrSuc = $pdo->prepare("UPDATE stocks_succursales SET quantite = quantite - ? WHERE produit_id = ? AND succursale_id = ?");
+            $stmtDecrGen = $pdo->prepare("UPDATE stocks SET quantite = quantite - ?, derniere_modification = NOW() WHERE produit_id = ?");
+            $stmtDecrSuc = $pdo->prepare("UPDATE stocks_succursales SET quantite = quantite - ?, date_maj = NOW() WHERE produit_id = ? AND succursale_id = ?");
             $stmtMvt     = $pdo->prepare("
                 INSERT INTO mouvements_stock (produit_id, succursale_id, utilisateur_id, type_mouvement, quantite, motif)
-                VALUES (?, ?, ?, 'Vente', ?, ?)
+                VALUES (?, ?, ?, 'Sortie', ?, ?)
             ");
 
             foreach ($lignesValides as $l) {
@@ -165,11 +166,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'vendr
 // DONNÉES POUR L'INTERFACE
 // ============================================================
 $stmtProduits = $pdo->prepare("
-    SELECT p.id, p.nom_produit, p.prix_vente
+    SELECT p.id, p.nom_produit, p.photo, p.prix_vente
     FROM produits p
     WHERE p.statut = 'Disponible'
     ORDER BY p.id DESC
-    LIMIT 5
 ");
 $stmtProduits->execute();
 $produits = $stmtProduits->fetchAll();
@@ -289,12 +289,20 @@ $ventesRecentes = $pdo->query("
                                         data-nom="<?= h($p['nom_produit']) ?>"
                                         data-prix="<?= (float)$p['prix_vente'] ?>"
                                         onclick="ajouterAuPanier(this)"
-                                        class="group flex min-h-16 items-center justify-between gap-3 rounded-xl border border-slate-100 bg-white p-3 text-left transition hover:border-green-300 hover:bg-green-50/40">
-                                    <div class="min-w-0">
+                                        class="group flex min-h-20 items-center gap-3 rounded-xl border border-slate-100 bg-white p-3 text-left transition hover:border-green-300 hover:bg-green-50/40">
+                                    <div class="h-14 w-14 shrink-0 overflow-hidden rounded-lg bg-green-50">
+                                        <?php if (!empty($p['photo'])): ?>
+                                            <img src="<?= h($p['photo']) ?>" alt="<?= h($p['nom_produit']) ?>" class="h-full w-full object-cover" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                                            <div class="hidden h-full w-full items-center justify-center text-green-700"><svg class="h-7 w-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Z"/><path d="m4.5 7.8 7.5 4.3 7.5-4.3M12 12v9"/></svg></div>
+                                        <?php else: ?>
+                                            <div class="flex h-full w-full items-center justify-center text-green-700"><svg class="h-7 w-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Z"/><path d="m4.5 7.8 7.5 4.3 7.5-4.3M12 12v9"/></svg></div>
+                                        <?php endif; ?>
+                                    </div>
+                                    <div class="min-w-0 flex-1">
                                         <p class="truncate text-sm font-semibold text-slate-800"><?= h($p['nom_produit']) ?></p>
                                         <p class="mt-1 text-xs font-bold text-green-700"><?= h(formatMontant($p['prix_vente'])) ?></p>
+                                        <span class="stock-info mt-1 block text-[10px] text-slate-400">Stock : —</span>
                                     </div>
-                                    <span class="stock-info shrink-0 text-right text-[10px] text-slate-400">Stock : —</span>
                                 </button>
                             <?php endforeach; ?>
                         </div>

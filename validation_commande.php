@@ -13,20 +13,44 @@ $id_client = (int) $_SESSION["id_client"];
 $message = "";
 $erreur = false;
 $succursalesActives = $pdo->query("
-    SELECT id
+    SELECT id, nom, type
     FROM succursales
     WHERE statut = 'Active'
-")->fetchAll(PDO::FETCH_COLUMN);
-$idsSuccursalesActives = array_map('intval', $succursalesActives);
+    ORDER BY type = 'CENTRALE' DESC, nom
+")->fetchAll(PDO::FETCH_ASSOC);
+$idsSuccursalesActives = array_map(
+    fn($succursale) => (int)$succursale["id"],
+    $succursalesActives
+);
+$succursaleCentraleId = 0;
+foreach ($succursalesActives as $succursale) {
+    if (strtoupper((string)$succursale["type"]) === "CENTRALE") {
+        $succursaleCentraleId = (int)$succursale["id"];
+        break;
+    }
+}
 $succursaleParDefaut = (int)parametre('succursale_par_defaut', 1);
-$succursaleId = (int)($_SESSION['succursale_vente'] ?? $succursaleParDefaut);
+$succursaleDemandee = isset($_GET["succursale"])
+    ? (int)$_GET["succursale"]
+    : (int)($_SESSION['succursale_vente'] ?? $succursaleParDefaut);
 
-if (!in_array($succursaleId, $idsSuccursalesActives, true)) {
+if (in_array($succursaleDemandee, $idsSuccursalesActives, true)) {
+    $succursaleId = $succursaleDemandee;
+} else {
     $succursaleId = in_array($succursaleParDefaut, $idsSuccursalesActives, true)
         ? $succursaleParDefaut
         : ($idsSuccursalesActives[0] ?? 0);
-    $_SESSION['succursale_vente'] = $succursaleId;
 }
+$_SESSION['succursale_vente'] = $succursaleId;
+
+$succursaleActive = null;
+foreach ($succursalesActives as $succursale) {
+    if ((int)$succursale["id"] === $succursaleId) {
+        $succursaleActive = $succursale;
+        break;
+    }
+}
+$devise = parametre("devise", "USD");
 
 if ($succursaleId <= 0) {
     $message = "Aucune succursale active n'est disponible pour prendre une commande.";
@@ -88,7 +112,7 @@ if (empty($ids)) {
 }
 
 $placeholders = implode(",", array_fill(0, count($ids), "?"));
-$jointureStock = $succursaleId === 1
+$jointureStock = $succursaleId === $succursaleCentraleId
     ? "LEFT JOIN stocks s ON s.produit_id = p.id"
     : "LEFT JOIN stocks_succursales s ON s.produit_id = p.id AND s.succursale_id = ?";
 
@@ -106,7 +130,7 @@ $sql = "
 ";
 
 $requete = $pdo->prepare($sql);
-$parametresStock = $succursaleId === 1
+$parametresStock = $succursaleId === $succursaleCentraleId
     ? array_keys($ids)
     : array_merge([$succursaleId], array_keys($ids));
 $requete->execute($parametresStock);
@@ -166,7 +190,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             // Verrouiller et vérifier chaque produit et son stock
             foreach ($ids as $id => $quantite) {
 
-                $jointureStockVerifie = $succursaleId === 1
+                $jointureStockVerifie = $succursaleId === $succursaleCentraleId
                     ? "INNER JOIN stocks s ON s.produit_id = p.id"
                     : "INNER JOIN stocks_succursales s ON s.produit_id = p.id AND s.succursale_id = ?";
                 $verifier = $pdo->prepare("
@@ -182,7 +206,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                     FOR UPDATE
                 ");
 
-                $parametresVerifier = $succursaleId === 1
+                $parametresVerifier = $succursaleId === $succursaleCentraleId
                     ? [$id]
                     : [$succursaleId, $id];
                 $verifier->execute($parametresVerifier);
@@ -259,7 +283,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 VALUES (?, ?, ?, ?, ?)
             ");
 
-            $update_stock = $succursaleId === 1
+            $update_stock = $succursaleId === $succursaleCentraleId
                 ? $pdo->prepare("
                     UPDATE stocks
                     SET quantite = quantite - ?,
@@ -277,13 +301,14 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 INSERT INTO mouvements_stock
                 (
                     produit_id,
+                    succursale_id,
                     utilisateur_id,
                     type_mouvement,
                     quantite,
                     motif,
                     date_mouvement
                 )
-                VALUES (?, NULL, 'Sortie', ?, ?, NOW())
+                VALUES (?, ?, NULL, 'Sortie', ?, ?, NOW())
             ");
 
             // Enregistrer les détails et déduire le stock
@@ -302,13 +327,23 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                     $sous_total
                 ]);
 
-                $parametresUpdateStock = $succursaleId === 1
+                $parametresUpdateStock = $succursaleId === $succursaleCentraleId
                     ? [$quantite, $id_produit]
                     : [$quantite, $succursaleId, $id_produit];
                 $update_stock->execute($parametresUpdateStock);
 
+                if ($update_stock->rowCount() !== 1) {
+                    throw new RuntimeException(
+                        "Le stock du produit " . $produit["nom_produit"]
+                        . " n'a pas pu être mis à jour."
+                    );
+                }
+
                 $insert_mouvement->execute([
                     $id_produit,
+                    $succursaleId === $succursaleCentraleId
+                        ? null
+                        : $succursaleId,
                     $quantite,
                     "Commande " . $numero_commande
                 ]);
@@ -400,6 +435,13 @@ if (!function_exists("h")) {
         <p class="text-gray-500 mt-2">
             Vérifiez vos informations et confirmez votre achat.
         </p>
+
+        <?php if ($succursaleActive): ?>
+            <div class="mt-4 inline-flex items-center gap-2 rounded-xl border border-green-200 bg-green-50 px-4 py-2 text-sm text-green-800">
+                <span class="font-semibold">Point de vente :</span>
+                <?= h($succursaleActive["nom"]) ?>
+            </div>
+        <?php endif; ?>
     </div>
 
     <?php if ($message !== ""): ?>
@@ -472,7 +514,7 @@ if (!function_exists("h")) {
 
                 <?php foreach ($produits as $produit): ?>
 
-                    <div class="flex items-center gap-4 border-b pb-5">
+                    <div class="flex flex-col sm:flex-row sm:items-center gap-4 border-b pb-5">
 
                         <?php if (!empty($produit["photo"])): ?>
                             <img
@@ -503,16 +545,20 @@ if (!function_exists("h")) {
                                 Prix unitaire :
                                 <?= number_format(
                                     (float)$produit["prix_vente"],
-                                    2
-                                ) ?> $
+                                    2,
+                                    ",",
+                                    " "
+                                ) ?> <?= h($devise) ?>
                             </p>
                         </div>
 
-                        <div class="font-bold text-green-700">
+                        <div class="font-bold text-green-700 sm:text-right">
                             <?= number_format(
                                 (float)$produit["sous_total"],
-                                2
-                            ) ?> $
+                                2,
+                                ",",
+                                " "
+                            ) ?> <?= h($devise) ?>
                         </div>
 
                     </div>
@@ -528,7 +574,7 @@ if (!function_exists("h")) {
                 </span>
 
                 <span class="text-2xl font-bold text-green-700">
-                    <?= number_format($total, 2) ?> $
+                    <?= number_format($total, 2, ",", " ") ?> <?= h($devise) ?>
                 </span>
 
             </div>

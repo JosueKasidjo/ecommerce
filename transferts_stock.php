@@ -28,7 +28,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'trans
             }
 
             // Décrémenter stock général
-            $pdo->prepare("UPDATE stocks SET quantite = quantite - ? WHERE produit_id = ?")->execute([$quantite, $produitId]);
+            $pdo->prepare("UPDATE stocks SET quantite = quantite - ?, derniere_modification = NOW() WHERE produit_id = ?")->execute([$quantite, $produitId]);
 
             // Ajouter au stock de la succursale
             $pdo->prepare("

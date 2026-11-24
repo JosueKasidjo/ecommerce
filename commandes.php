@@ -612,9 +612,6 @@ function formatMontantCommande($montant) {
                                                 <?= h($commande["numero_commande"]) ?>
                                             </p>
 
-                                            <p class="mt-1 text-xs text-slate-400">
-                                                ID : <?= (int)$commande["id"] ?>
-                                            </p>
 
                                         </td>
 

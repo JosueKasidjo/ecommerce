@@ -21,26 +21,11 @@ if (empty($_SESSION['csrf_boutique'])) {
     $_SESSION['csrf_boutique'] = bin2hex(random_bytes(32));
 }
 
-$succursales = $pdo->query("
-    SELECT id, nom
-    FROM succursales
-    WHERE statut = 'Active'
-    ORDER BY nom
-")->fetchAll(PDO::FETCH_ASSOC);
-$idsSuccursalesActives = array_map('intval', array_column($succursales, 'id'));
-$succursaleParDefaut = (int)parametre('succursale_par_defaut', 1);
-$succursaleDemandee = isset($_GET['succursale'])
-    ? (int)$_GET['succursale']
-    : (int)($_SESSION['succursale_vente'] ?? $succursaleParDefaut);
-
-if (in_array($succursaleDemandee, $idsSuccursalesActives, true)) {
-    $succursaleId = $succursaleDemandee;
-} elseif (in_array($succursaleParDefaut, $idsSuccursalesActives, true)) {
-    $succursaleId = $succursaleParDefaut;
-} else {
-    $succursaleId = $idsSuccursalesActives[0] ?? $succursaleParDefaut;
-}
-$_SESSION['succursale_vente'] = $succursaleId;
+$stockDisponibleSql = "COALESCE(
+    (SELECT s.quantite FROM stocks s WHERE s.produit_id = p.id), 0
+) + COALESCE(
+    (SELECT SUM(ss.quantite) FROM stocks_succursales ss WHERE ss.produit_id = p.id), 0
+)";
 
 // Ajouter un produit au panier sans obliger le visiteur à créer un compte.
 $messagePanier = '';
@@ -61,24 +46,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajouter_panier'])) {
             $messagePanier = "Produit invalide.";
             $typeMessage = 'error';
         } else {
-            $jointureStock = $succursaleId === 1
-                ? "LEFT JOIN stocks s ON s.produit_id = p.id"
-                : "LEFT JOIN stocks_succursales s ON s.produit_id = p.id AND s.succursale_id = :succursale";
             $stmt = $pdo->prepare("
                 SELECT p.id, p.nom_produit, p.prix_vente, p.statut,
-                       COALESCE(s.quantite, 0) AS stock_disponible
+                       $stockDisponibleSql AS stock_disponible
                 FROM produits p
-                $jointureStock
                 WHERE p.id = :id
                   AND p.statut = 'Disponible'
                   AND p.afficher_accueil = 1
                 LIMIT 1
             ");
-            $parametresStock = ['id' => $produitId];
-            if ($succursaleId !== 1) {
-                $parametresStock['succursale'] = $succursaleId;
-            }
-            $stmt->execute($parametresStock);
+            $stmt->execute(['id' => $produitId]);
             $produitAjoute = $stmt->fetch(PDO::FETCH_ASSOC);
 
             if (!$produitAjoute) {
@@ -131,22 +108,16 @@ $categories = $stmtCategories->fetchAll(PDO::FETCH_ASSOC);
 $sql = "
     SELECT p.id, p.nom_produit, p.description, p.photo, p.prix_vente,
            p.categorie_id, c.nom_categorie,
-           COALESCE(s.quantite, 0) AS stock_disponible
+           $stockDisponibleSql AS stock_disponible
     FROM produits p
     LEFT JOIN categories c ON c.id = p.categorie_id
 ";
-
-if ($succursaleId === 1) {
-    $sql .= " LEFT JOIN stocks s ON s.produit_id = p.id";
-} else {
-    $sql .= " LEFT JOIN stocks_succursales s ON s.produit_id = p.id AND s.succursale_id = :succursale";
-}
 
 $sql .= "
     WHERE p.statut = 'Disponible'
       AND p.afficher_accueil = 1
 ";
-$params = $succursaleId === 1 ? [] : ['succursale' => $succursaleId];
+$params = [];
 
 if ($recherche !== '') {
     $sql .= " AND (p.nom_produit LIKE :recherche OR p.description LIKE :recherche)";
@@ -210,13 +181,6 @@ $nomBoutique = 'NEXIA';
             </nav>
 
             <div class="flex items-center gap-2">
-                <select aria-label="Succursale de vente" onchange="location='index.php?succursale='+this.value" class="max-w-40 rounded-xl border border-gray-200 bg-white px-2 py-2 text-xs font-medium text-gray-700 sm:px-3 sm:text-sm">
-                    <?php foreach ($succursales as $succursale): ?>
-                        <option value="<?= (int)$succursale['id'] ?>" <?= $succursaleId === (int)$succursale['id'] ? 'selected' : '' ?>>
-                            <?= e_index($succursale['nom']) ?>
-                        </option>
-                    <?php endforeach; ?>
-                </select>
                 <a href="panier.php" class="relative inline-flex items-center gap-2 rounded-xl border border-gray-200 px-3 py-2 text-sm font-semibold text-gray-700 transition hover:border-green-600 hover:text-green-700">
                     <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
                         <path stroke-linecap="round" stroke-linejoin="round" d="M3 3h2l2.2 11.2a2 2 0 0 0 2 1.6h8.9a2 2 0 0 0 2-1.6L21 8H6"/>
@@ -291,7 +255,6 @@ $nomBoutique = 'NEXIA';
                 </div>
 
                 <form method="GET" action="index.php" class="grid w-full gap-2 sm:grid-cols-[1fr_190px_auto] md:max-w-2xl">
-                    <input type="hidden" name="succursale" value="<?= $succursaleId ?>">
                     <input type="search" name="recherche" value="<?= e_index($recherche) ?>" placeholder="Rechercher un produit..." class="w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-sm outline-none transition focus:border-green-600 focus:ring-2 focus:ring-green-100">
                     <select name="categorie" class="w-full rounded-xl border border-gray-300 bg-white px-3 py-3 text-sm outline-none focus:border-green-600 focus:ring-2 focus:ring-green-100">
                         <option value="">Toutes les catégories</option>

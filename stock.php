@@ -71,7 +71,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'ajust
                 $pdo->prepare("
                     INSERT INTO stocks (produit_id, quantite, seuil_alerte)
                     VALUES (?, ?, ?)
-                    ON DUPLICATE KEY UPDATE quantite = quantite $signe VALUES(quantite), date_maj = NOW()
+                    ON DUPLICATE KEY UPDATE quantite = quantite $signe VALUES(quantite), derniere_modification = NOW()
                 ")->execute([$produitId, $quantite, $seuilDefaut]);
             }
 
@@ -80,7 +80,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'ajust
                 INSERT INTO mouvements_stock (produit_id, succursale_id, utilisateur_id, type_mouvement, quantite, motif)
                 VALUES (?, ?, ?, ?, ?, ?)
             ")->execute([$produitId, $succId ?: null, $_SESSION['id_utilisateur'] ?? null,
-                         $type === 'Entrée' ? 'Entrée' : 'Ajustement', $quantite, $motif]);
+                         $type === 'Entrée' ? 'Entree' : 'Ajustement', $quantite, $motif]);
 
             $pdo->commit();
             $message = "Stock ajusté : $signe$quantite unité(s).";
@@ -314,7 +314,6 @@ if ($filtreSucc > 0) {
                                 <td class="px-5 py-4">
                                     <div>
                                         <p class="font-semibold text-slate-800"><?= h($l['nom_produit']) ?></p>
-                                        <p class="mt-0.5 text-xs text-slate-400">#<?= (int)$l['produit_id'] ?></p>
                                     </div>
                                 </td>
                                 <td class="px-5 py-4">

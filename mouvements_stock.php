@@ -194,18 +194,17 @@ try {
                 <div class="overflow-x-auto">
                     <table class="w-full min-w-[850px] text-left text-sm">
                         <thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
-                            <tr><th class="px-5 py-4">N°</th><th class="px-5 py-4">Date et heure</th><th class="px-5 py-4">Produit</th><th class="px-5 py-4">Type</th><th class="px-5 py-4">Quantité</th><th class="px-5 py-4">Motif</th><th class="px-5 py-4">Utilisateur</th></tr>
+                            <tr><th class="px-5 py-4">Date et heure</th><th class="px-5 py-4">Produit</th><th class="px-5 py-4">Type</th><th class="px-5 py-4">Quantité</th><th class="px-5 py-4">Motif</th><th class="px-5 py-4">Utilisateur</th></tr>
                         </thead>
                         <tbody class="divide-y divide-slate-100">
                         <?php if (!$mouvements): ?>
-                            <tr><td colspan="7" class="px-5 py-12 text-center"><svg class="mx-auto h-8 w-8 text-slate-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M8 4h8l3 3v13H5V4h3Z"/><path d="M8 4v4h8V4M8 12h8M8 16h8"/></svg><p class="mt-2 font-semibold text-slate-700">Aucun mouvement trouvé</p><p class="mt-1 text-sm text-slate-500">Essayez de modifier vos critères de recherche.</p></td></tr>
+                            <tr><td colspan="6" class="px-5 py-12 text-center"><svg class="mx-auto h-8 w-8 text-slate-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M8 4h8l3 3v13H5V4h3Z"/><path d="M8 4v4h8V4M8 12h8M8 16h8"/></svg><p class="mt-2 font-semibold text-slate-700">Aucun mouvement trouvé</p><p class="mt-1 text-sm text-slate-500">Essayez de modifier vos critères de recherche.</p></td></tr>
                         <?php else: foreach ($mouvements as $m): ?>
                             <tr class="hover:bg-slate-50/70">
-                                <td class="px-5 py-4 text-slate-400">#<?= (int)$m["id"] ?></td>
                                 <td class="whitespace-nowrap px-5 py-4 text-slate-500"><?= h(date("d/m/Y H:i", strtotime($m["date_mouvement"]))) ?></td>
                                 <td class="px-5 py-4"><div class="flex items-center gap-3">
                                     <?php if (!empty($m["photo"])): ?><img src="<?= h($m["photo"]) ?>" alt="" class="h-10 w-10 rounded-lg border border-slate-200 object-cover"><?php else: ?><div class="flex h-10 w-10 items-center justify-center rounded-lg bg-green-50 text-green-700"><svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Z"/><path d="m4.5 7.8 7.5 4.3 7.5-4.3M12 12v9"/></svg></div><?php endif; ?>
-                                    <div><p class="font-semibold text-slate-800"><?= h($m["nom_produit"]) ?></p><p class="text-xs text-slate-400">Produit #<?= (int)$m["produit_id"] ?></p></div>
+                                    <div><p class="font-semibold text-slate-800"><?= h($m["nom_produit"]) ?></p></div>
                                 </div></td>
                                 <td class="px-5 py-4">
                                     <?php if ($m["type_mouvement"] === "Entree"): ?><span class="rounded-full bg-green-100 px-3 py-1 text-xs font-semibold text-green-700">Entrée</span>
