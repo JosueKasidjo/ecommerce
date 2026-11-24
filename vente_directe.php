@@ -4,16 +4,26 @@ if (!isset($_SESSION['id_utilisateur'])) { header('Location: login.php'); exit; 
 
 $nomUtilisateur  = $_SESSION['nom'] ?? 'Administrateur';
 $roleUtilisateur = $_SESSION['role'] ?? 'Administrateur';
+$accesRestreint = utilisateurEstLimiteAuPointDeVente();
+$succursaleUtilisateurId = $accesRestreint ? exigerSuccursaleUtilisateur() : 0;
 $nomEntreprise   = parametre('nom_entreprise', 'NEXIA');
 $tauxTVA         = (float)parametre('taux_tva', 0);
 
-$erreur = ''; $message = ''; $derniereCommandeId = 0;
+$erreur = ''; $message = ''; $avertissement = ''; $derniereCommandeId = 0;
 
 // --- Succursales actives ---
 $succursales = $pdo->query("SELECT id, nom, code, type FROM succursales WHERE statut='Active' ORDER BY type='CENTRALE' DESC, nom")->fetchAll();
+if ($accesRestreint) {
+    $succursales = array_values(array_filter(
+        $succursales,
+        static fn($succursale) => (int)$succursale['id'] === $succursaleUtilisateurId
+    ));
+}
 $idsSuccursalesActives = array_map('intval', array_column($succursales, 'id'));
 $succursaleDefaut = (int)parametre('succursale_par_defaut', 1);
-if (!array_filter($succursales, fn($s) => (int)$s['id'] === $succursaleDefaut)) {
+if ($accesRestreint) {
+    $succursaleDefaut = $succursaleUtilisateurId;
+} elseif (!array_filter($succursales, fn($s) => (int)$s['id'] === $succursaleDefaut)) {
     $succursaleDefaut = (int)($succursales[0]['id'] ?? 0);
 }
 $succursaleCentraleId = 0;
@@ -35,7 +45,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'vendr
     $panierJson = $_POST['panier_json'] ?? '[]';
     $panier     = json_decode($panierJson, true);
 
-    if ($succId <= 0 || !in_array($succId, $idsSuccursalesActives, true)) {
+    if ($succId <= 0 || !in_array($succId, $idsSuccursalesActives, true)
+        || ($accesRestreint && $succId !== $succursaleUtilisateurId)) {
         $erreur = "Veuillez choisir un point de vente.";
     } elseif (!is_array($panier) || empty($panier)) {
         $erreur = "Le panier est vide. Ajoutez au moins un produit.";
@@ -150,9 +161,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'vendr
                 VALUES (?, ?, ?, 'Valide', NOW())
             ")->execute([$commandeId, $total, $methode]);
 
+            $stmtCaisse = $pdo->prepare("
+                SELECT id FROM caisse_sessions
+                WHERE succursale_id = ? AND statut = 'Ouverte'
+                ORDER BY date_ouverture DESC LIMIT 1
+                FOR UPDATE
+            ");
+            $stmtCaisse->execute([$succId]);
+            $sessionCaisseId = (int)($stmtCaisse->fetchColumn() ?: 0);
+            if ($sessionCaisseId > 0) {
+                $pdo->prepare("
+                    INSERT INTO caisse_mouvements (session_id, utilisateur_id, type, montant, libelle, reference)
+                    VALUES (?, ?, 'Encaissement', ?, ?, ?)
+                ")->execute([
+                    $sessionCaisseId,
+                    (int)$_SESSION['id_utilisateur'],
+                    $total,
+                    "Vente directe $numero ($methode)",
+                    $numero,
+                ]);
+            }
+
             $pdo->commit();
 
             $message = "Vente $numero enregistrée avec succès (" . formatMontant($total) . ").";
+            if ($sessionCaisseId > 0) {
+                $message .= " Montant affecté à la caisse.";
+            } else {
+                $avertissement = "Aucune caisse ouverte pour ce point de vente : le montant n'a pas été affecté à une caisse.";
+            }
             $derniereCommandeId = $commandeId;
 
         } catch (Throwable $e) {
@@ -176,17 +213,25 @@ $produits = $stmtProduits->fetchAll();
 
 // Stock par succursale pour le JS (filtre dynamique)
 $stockParSucc = [];
-$rows = $pdo->query("SELECT succursale_id, produit_id, quantite FROM stocks_succursales")->fetchAll();
+if ($accesRestreint) {
+    $stmtStocks = $pdo->prepare("SELECT succursale_id, produit_id, quantite FROM stocks_succursales WHERE succursale_id = ?");
+    $stmtStocks->execute([$succursaleUtilisateurId]);
+    $rows = $stmtStocks->fetchAll();
+} else {
+    $rows = $pdo->query("SELECT succursale_id, produit_id, quantite FROM stocks_succursales")->fetchAll();
+}
 foreach ($rows as $r) {
     $stockParSucc[(int)$r['succursale_id']][(int)$r['produit_id']] = (int)$r['quantite'];
 }
 // Stock général = succursale centrale
-foreach ($pdo->query("SELECT produit_id, quantite FROM stocks")->fetchAll() as $r) {
-    $stockParSucc[$succursaleCentraleId][(int)$r['produit_id']] = (int)$r['quantite'];
+if (!$accesRestreint || $succursaleUtilisateurId === $succursaleCentraleId) {
+    foreach ($pdo->query("SELECT produit_id, quantite FROM stocks")->fetchAll() as $r) {
+        $stockParSucc[$succursaleCentraleId][(int)$r['produit_id']] = (int)$r['quantite'];
+    }
 }
 
-// Ventes récentes (toutes succursales)
-$ventesRecentes = $pdo->query("
+// Ventes récentes (toutes succursales pour l'administration, sinon le point de vente connecté)
+$sqlVentesRecentes = "
     SELECT c.id, c.numero_commande, c.date_commande, c.montant_total,
            cl.nom, cl.postnom, cl.prenom,
            s.nom AS succursale_nom, s.code AS succursale_code,
@@ -195,9 +240,13 @@ $ventesRecentes = $pdo->query("
     INNER JOIN clients cl ON cl.id = c.client_id
     LEFT JOIN succursales s ON s.id = c.succursale_id
     WHERE c.statut = 'Livree'
+    " . ($accesRestreint ? "AND c.succursale_id = ?" : "") . "
     ORDER BY c.date_commande DESC
     LIMIT 15
-")->fetchAll();
+";
+$stmtVentesRecentes = $pdo->prepare($sqlVentesRecentes);
+$stmtVentesRecentes->execute($accesRestreint ? [$succursaleUtilisateurId] : []);
+$ventesRecentes = $stmtVentesRecentes->fetchAll();
 ?>
 <!DOCTYPE html>
 <html lang="fr">
@@ -234,6 +283,9 @@ $ventesRecentes = $pdo->query("
 
             <?php if ($erreur !== ''): ?>
                 <div class="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"><?= h($erreur) ?></div>
+            <?php endif; ?>
+            <?php if ($avertissement !== ''): ?>
+                <div class="mb-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"><?= h($avertissement) ?></div>
             <?php endif; ?>
             <?php if ($message !== ''): ?>
                 <div class="mb-6 rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700 flex items-center justify-between">

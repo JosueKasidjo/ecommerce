@@ -4,6 +4,8 @@ if (!isset($_SESSION['id_utilisateur'])) { header('Location: login.php'); exit; 
 
 $id = (int)($_GET['id'] ?? 0);
 if ($id <= 0) { exit('Commande invalide.'); }
+$accesRestreint = utilisateurEstLimiteAuPointDeVente();
+$succursaleUtilisateurId = $accesRestreint ? exigerSuccursaleUtilisateur() : 0;
 
 $stmt = $pdo->prepare("
     SELECT c.*, cl.nom, cl.postnom, cl.prenom, cl.telephone, cl.email, cl.adresse,
@@ -12,11 +14,15 @@ $stmt = $pdo->prepare("
     INNER JOIN clients cl ON cl.id = c.client_id
     LEFT JOIN succursales s ON s.id = c.succursale_id
     WHERE c.id = ?
+    " . ($accesRestreint ? "AND c.succursale_id = ?" : "") . "
     LIMIT 1
 ");
-$stmt->execute([$id]);
+$stmt->execute($accesRestreint ? [$id, $succursaleUtilisateurId] : [$id]);
 $commande = $stmt->fetch();
-if (!$commande) { exit('Commande introuvable.'); }
+if (!$commande) {
+    http_response_code(404);
+    exit('Commande introuvable.');
+}
 
 $lignes = $pdo->prepare("
     SELECT dc.quantite, dc.prix_unitaire, dc.sous_total, p.nom_produit

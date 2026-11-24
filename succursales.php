@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__ . '/config.php';
 if (!isset($_SESSION['id_utilisateur'])) { header('Location: login.php'); exit; }
+exigerAccesAdministration();
 
 $nomUtilisateur  = $_SESSION['nom'] ?? 'Administrateur';
 $roleUtilisateur = $_SESSION['role'] ?? 'Administrateur';

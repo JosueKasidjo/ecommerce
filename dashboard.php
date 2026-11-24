@@ -4,6 +4,9 @@ if (!isset($_SESSION['id_utilisateur'])) { header('Location: login.php'); exit; 
 
 $nomUtilisateur  = $_SESSION['nom'] ?? 'Administrateur';
 $roleUtilisateur = $_SESSION['role'] ?? 'Administrateur';
+$accesRestreint = utilisateurEstLimiteAuPointDeVente();
+$succursaleUtilisateurId = $accesRestreint ? exigerSuccursaleUtilisateur() : 0;
+$pointDeVenteCentral = $accesRestreint && $succursaleUtilisateurId === succursaleCentraleId();
 
 $stats = [
     'produits' => 0, 'categories' => 0, 'clients' => 0, 'commandes' => 0,
@@ -19,17 +22,50 @@ try {
     // --- Statistiques de base ---
     $stats['produits']    = (int)$pdo->query("SELECT COUNT(*) FROM produits")->fetchColumn();
     $stats['categories']  = (int)$pdo->query("SELECT COUNT(*) FROM categories")->fetchColumn();
-    $stats['clients']     = (int)$pdo->query("SELECT COUNT(*) FROM clients")->fetchColumn();
-    $stats['commandes']   = (int)$pdo->query("SELECT COUNT(*) FROM commandes")->fetchColumn();
-    $stats['succursales'] = (int)$pdo->query("SELECT COUNT(*) FROM succursales WHERE statut='Active'")->fetchColumn();
+    if (!$accesRestreint) {
+        $stats['clients'] = (int)$pdo->query("SELECT COUNT(*) FROM clients")->fetchColumn();
+        $stats['succursales'] = (int)$pdo->query("SELECT COUNT(*) FROM succursales WHERE statut='Active'")->fetchColumn();
+    } else {
+        $stmt = $pdo->prepare("SELECT COUNT(*) FROM commandes WHERE succursale_id = ?");
+        $stmt->execute([$succursaleUtilisateurId]);
+        $stats['commandes'] = (int)$stmt->fetchColumn();
+        $stats['succursales'] = 1;
+    }
+    if (!$accesRestreint) {
+        $stats['commandes'] = (int)$pdo->query("SELECT COUNT(*) FROM commandes")->fetchColumn();
+    }
 
     // --- Stocks ---
-    $stats['stock_general']     = (int)$pdo->query("SELECT COALESCE(SUM(quantite),0) FROM stocks")->fetchColumn();
-    $stats['stock_succursales'] = (int)$pdo->query("SELECT COALESCE(SUM(quantite),0) FROM stocks_succursales")->fetchColumn();
+    if ($accesRestreint) {
+        if ($pointDeVenteCentral) {
+            $stats['stock_succursales'] = (int)$pdo->query("SELECT COALESCE(SUM(quantite),0) FROM stocks")->fetchColumn();
+        } else {
+            $stmt = $pdo->prepare("SELECT COALESCE(SUM(quantite),0) FROM stocks_succursales WHERE succursale_id = ?");
+            $stmt->execute([$succursaleUtilisateurId]);
+            $stats['stock_succursales'] = (int)$stmt->fetchColumn();
+        }
+    } else {
+        $stats['stock_general'] = (int)$pdo->query("SELECT COALESCE(SUM(quantite),0) FROM stocks")->fetchColumn();
+        $stats['stock_succursales'] = (int)$pdo->query("SELECT COALESCE(SUM(quantite),0) FROM stocks_succursales")->fetchColumn();
+    }
 
     // Alertes : produits sous le seuil, dans le stock général OU dans une succursale
     $seuilDefaut = (int)parametre('seuil_alerte_defaut', 5);
-    $stats['alertes'] = (int)$pdo->query("
+    if ($pointDeVenteCentral) {
+        $stats['alertes'] = (int)$pdo->query("
+            SELECT COUNT(*) FROM produits p
+            LEFT JOIN stocks s ON s.produit_id = p.id
+            WHERE COALESCE(s.quantite, 0) <= COALESCE(s.seuil_alerte, $seuilDefaut)
+        ")->fetchColumn();
+    } elseif ($accesRestreint) {
+        $stmt = $pdo->prepare("
+            SELECT COUNT(*) FROM stocks_succursales
+            WHERE succursale_id = ? AND quantite <= seuil_alerte
+        ");
+        $stmt->execute([$succursaleUtilisateurId]);
+        $stats['alertes'] = (int)$stmt->fetchColumn();
+    } else {
+        $stats['alertes'] = (int)$pdo->query("
         SELECT COUNT(*) FROM (
             SELECT p.id FROM produits p
             LEFT JOIN stocks s ON s.produit_id = p.id
@@ -39,27 +75,67 @@ try {
             INNER JOIN stocks_succursales ss ON ss.produit_id = p.id
             WHERE ss.quantite <= ss.seuil_alerte
         ) AS alertes
-    ")->fetchColumn();
+        ")->fetchColumn();
+    }
 
     // --- Ventes ---
-    $stats['ventes'] = (float)$pdo->query("
-        SELECT COALESCE(SUM(montant),0) FROM paiements WHERE statut='Valide'
-    ")->fetchColumn();
+    if ($accesRestreint) {
+        $stmt = $pdo->prepare("
+            SELECT COALESCE(SUM(p.montant),0)
+            FROM paiements p
+            INNER JOIN commandes c ON c.id = p.commande_id
+            WHERE p.statut = 'Valide' AND c.succursale_id = ?
+        ");
+        $stmt->execute([$succursaleUtilisateurId]);
+        $stats['ventes'] = (float)$stmt->fetchColumn();
+    } else {
+        $stats['ventes'] = (float)$pdo->query("
+            SELECT COALESCE(SUM(montant),0) FROM paiements WHERE statut='Valide'
+        ")->fetchColumn();
+    }
 
     // --- Commandes récentes ---
-    $commandesRecentes = $pdo->query("
+    $sqlCommandesRecentes = "
         SELECT c.id, c.numero_commande, c.date_commande, c.montant_total, c.statut,
                cl.nom, cl.postnom, cl.prenom,
                s.nom AS succursale_nom
         FROM commandes c
         INNER JOIN clients cl ON cl.id = c.client_id
         LEFT JOIN succursales s ON s.id = c.succursale_id
+        " . ($accesRestreint ? "WHERE c.succursale_id = ?" : "") . "
         ORDER BY c.date_commande DESC
         LIMIT 6
-    ")->fetchAll();
+    ";
+    $stmt = $pdo->prepare($sqlCommandesRecentes);
+    $stmt->execute($accesRestreint ? [$succursaleUtilisateurId] : []);
+    $commandesRecentes = $stmt->fetchAll();
 
-    // --- Stocks faibles (général + succursales) ---
-    $stocksFaibles = $pdo->query("
+    // --- Stocks faibles (général pour le central, succursale sinon) ---
+    if ($pointDeVenteCentral) {
+        $stocksFaibles = $pdo->query("
+            SELECT p.nom_produit, 'Stock général' AS emplacement,
+                   COALESCE(s.quantite, 0) AS quantite,
+                   COALESCE(s.seuil_alerte, $seuilDefaut) AS seuil_alerte
+            FROM produits p
+            LEFT JOIN stocks s ON s.produit_id = p.id
+            WHERE COALESCE(s.quantite, 0) <= COALESCE(s.seuil_alerte, $seuilDefaut)
+            ORDER BY quantite ASC
+            LIMIT 8
+        ")->fetchAll();
+    } elseif ($accesRestreint) {
+        $stmt = $pdo->prepare("
+            SELECT p.nom_produit, sc.nom AS emplacement, ss.quantite, ss.seuil_alerte
+            FROM stocks_succursales ss
+            INNER JOIN produits p ON p.id = ss.produit_id
+            INNER JOIN succursales sc ON sc.id = ss.succursale_id
+            WHERE ss.succursale_id = ? AND ss.quantite <= ss.seuil_alerte
+            ORDER BY ss.quantite ASC
+            LIMIT 8
+        ");
+        $stmt->execute([$succursaleUtilisateurId]);
+        $stocksFaibles = $stmt->fetchAll();
+    } else {
+        $stocksFaibles = $pdo->query("
         SELECT p.nom_produit, 'Stock général' AS emplacement,
                COALESCE(s.quantite,0) AS quantite, COALESCE(s.seuil_alerte, $seuilDefaut) AS seuil_alerte
         FROM produits p
@@ -73,18 +149,23 @@ try {
         WHERE ss.quantite <= ss.seuil_alerte
         ORDER BY quantite ASC
         LIMIT 8
-    ")->fetchAll();
+        ")->fetchAll();
+    }
 
     // --- Ventes par succursale ---
-    $ventesParSuccursale = $pdo->query("
+    $sqlVentesParSuccursale = "
         SELECT s.nom, s.code, s.type,
                COUNT(c.id) AS nb_commandes,
                COALESCE(SUM(CASE WHEN c.statut != 'Annulee' THEN c.montant_total ELSE 0 END), 0) AS montant
         FROM succursales s
         LEFT JOIN commandes c ON c.succursale_id = s.id
+        " . ($accesRestreint ? "WHERE s.id = ?" : "") . "
         GROUP BY s.id
         ORDER BY montant DESC
-    ")->fetchAll();
+    ";
+    $stmt = $pdo->prepare($sqlVentesParSuccursale);
+    $stmt->execute($accesRestreint ? [$succursaleUtilisateurId] : []);
+    $ventesParSuccursale = $stmt->fetchAll();
 
 } catch (PDOException $e) {
     $erreur = "Erreur de base de données : " . $e->getMessage();
@@ -154,7 +235,9 @@ $nomEntreprise = parametre('nom_entreprise', 'NEXIA');
                         <p class="text-sm font-medium text-green-100">Bienvenue sur votre espace</p>
                         <h2 class="mt-2 text-2xl font-extrabold sm:text-3xl">Bonjour, <?= h($nomUtilisateur) ?> !</h2>
                         <p class="mt-2 max-w-xl text-sm leading-6 text-green-50">
-                            Pilotez votre réseau de <?= (int)$stats['succursales'] ?> succursale(s), suivez vos stocks et vos ventes en temps réel.
+                            <?= $accesRestreint
+                                ? 'Suivez les ventes, les commandes et le stock de votre point de vente.'
+                                : 'Pilotez votre réseau de ' . (int)$stats['succursales'] . ' succursale(s), suivez vos stocks et vos ventes en temps réel.' ?>
                         </p>
                     </div>
                     <div class="flex flex-wrap gap-3">
@@ -182,6 +265,7 @@ $nomEntreprise = parametre('nom_entreprise', 'NEXIA');
                     <p class="mt-1 text-xs text-slate-400"><?= number_format($stats['categories'], 0, ',', ' ') ?> catégorie(s)</p>
                 </div>
 
+                <?php if (!$accesRestreint): ?>
                 <div class="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm transition hover:-translate-y-1 hover:shadow-md">
                     <div class="flex items-center justify-between">
                         <span class="text-sm font-medium text-slate-500">Clients</span>
@@ -190,14 +274,15 @@ $nomEntreprise = parametre('nom_entreprise', 'NEXIA');
                     <p class="mt-4 text-3xl font-extrabold text-slate-900"><?= number_format($stats['clients'], 0, ',', ' ') ?></p>
                     <p class="mt-1 text-xs text-slate-400">Clients enregistrés</p>
                 </div>
+                <?php endif; ?>
 
                 <div class="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm transition hover:-translate-y-1 hover:shadow-md">
                     <div class="flex items-center justify-between">
-                        <span class="text-sm font-medium text-slate-500">Commandes</span>
+                        <span class="text-sm font-medium text-slate-500"><?= $accesRestreint ? 'Commandes du point de vente' : 'Commandes' ?></span>
                         <span class="flex h-11 w-11 items-center justify-center rounded-xl bg-amber-100 text-amber-700"><svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M3 4h2l2.2 10.2a2 2 0 0 0 2 1.6h8.5a2 2 0 0 0 2-1.6L21 8H6"/><circle cx="10" cy="19" r="1.2"/><circle cx="18" cy="19" r="1.2"/></svg></span>
                     </div>
                     <p class="mt-4 text-3xl font-extrabold text-slate-900"><?= number_format($stats['commandes'], 0, ',', ' ') ?></p>
-                    <p class="mt-1 text-xs text-slate-400">Toutes succursales</p>
+                    <p class="mt-1 text-xs text-slate-400"><?= $accesRestreint ? 'Votre succursale' : 'Toutes succursales' ?></p>
                 </div>
 
                 <div class="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm transition hover:-translate-y-1 hover:shadow-md">
@@ -211,8 +296,9 @@ $nomEntreprise = parametre('nom_entreprise', 'NEXIA');
             </section>
 
             <!-- Cartes réseau / stock -->
-            <section class="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <section class="mb-8 grid grid-cols-1 gap-4 <?= $accesRestreint ? 'sm:grid-cols-1' : 'sm:grid-cols-3' ?>">
 
+                <?php if (!$accesRestreint): ?>
                 <div class="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm">
                     <div class="flex items-center justify-between">
                         <span class="text-sm font-medium text-slate-500">Réseau NEXIA</span>
@@ -231,10 +317,11 @@ $nomEntreprise = parametre('nom_entreprise', 'NEXIA');
                     <p class="mt-4 text-3xl font-extrabold text-slate-900"><?= number_format($stats['stock_general'], 0, ',', ' ') ?></p>
                     <p class="mt-1 text-xs text-slate-400">Unités en centrale</p>
                 </div>
+                <?php endif; ?>
 
                 <div class="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm">
                     <div class="flex items-center justify-between">
-                        <span class="text-sm font-medium text-slate-500">Stock succursales</span>
+                        <span class="text-sm font-medium text-slate-500"><?= $accesRestreint ? 'Stock de votre point de vente' : 'Stock succursales' ?></span>
                         <span class="flex h-11 w-11 items-center justify-center rounded-xl bg-violet-100 text-violet-700"><svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 8h15l-3-3M20 16H5l3 3"/></svg></span>
                     </div>
                     <p class="mt-4 text-3xl font-extrabold text-slate-900"><?= number_format($stats['stock_succursales'], 0, ',', ' ') ?></p>
@@ -249,11 +336,11 @@ $nomEntreprise = parametre('nom_entreprise', 'NEXIA');
                 <div class="overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-sm xl:col-span-2">
                     <div class="flex items-center justify-between border-b border-slate-100 px-5 py-4">
                         <div>
-                            <h3 class="font-bold text-slate-900">Ventes par succursale</h3>
-                            <p class="mt-1 text-xs text-slate-400">Performance du réseau</p>
+                            <h3 class="font-bold text-slate-900"><?= $accesRestreint ? 'Activité de votre point de vente' : 'Ventes par succursale' ?></h3>
+                            <p class="mt-1 text-xs text-slate-400"><?= $accesRestreint ? 'Commandes et montants de votre succursale' : 'Performance du réseau' ?></p>
                         </div>
                         <span class="rounded-lg bg-green-50 px-3 py-1.5 text-xs font-semibold text-green-700">
-                            <?= count($ventesParSuccursale) ?> établissement(s)
+                            <?= count($ventesParSuccursale) ?> <?= $accesRestreint ? 'point de vente' : 'établissement(s)' ?>
                         </span>
                     </div>
                     <div class="overflow-x-auto">

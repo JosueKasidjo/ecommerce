@@ -4,12 +4,20 @@ if (!isset($_SESSION['id_utilisateur'])) { header('Location: login.php'); exit; 
 
 $nomUtilisateur  = $_SESSION['nom'] ?? 'Administrateur';
 $roleUtilisateur = $_SESSION['role'] ?? 'Administrateur';
+$accesRestreint = utilisateurEstLimiteAuPointDeVente();
+$succursaleUtilisateurId = $accesRestreint ? exigerSuccursaleUtilisateur() : 0;
+$succursaleStockId = $accesRestreint && $succursaleUtilisateurId === succursaleCentraleId()
+    ? 0
+    : $succursaleUtilisateurId;
 $nomEntreprise   = parametre('nom_entreprise', 'NEXIA');
 $seuilDefaut     = (int)parametre('seuil_alerte_defaut', 5);
 
 $erreur = ''; $message = '';
 $recherche = trim($_GET['q'] ?? '');
 $filtreSucc = (int)($_GET['succursale'] ?? 0);
+if ($accesRestreint) {
+    $filtreSucc = $succursaleStockId;
+}
 $page = max(1, (int)($_GET['page'] ?? 1));
 $parPage = 8;
 $decalage = ($page - 1) * $parPage;
@@ -17,7 +25,7 @@ $decalage = ($page - 1) * $parPage;
 // --- Mise à jour du seuil d'alerte ---
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'maj_seuil') {
     $produitId = (int)($_POST['produit_id'] ?? 0);
-    $succId    = (int)($_POST['succursale_id'] ?? 0);
+    $succId    = $accesRestreint ? $succursaleStockId : (int)($_POST['succursale_id'] ?? 0);
     $seuil     = max(0, (int)($_POST['seuil'] ?? $seuilDefaut));
     try {
         if ($succId > 0) {
@@ -35,7 +43,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'maj_s
 // --- Ajustement manuel du stock (entrée/sortie) ---
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'ajuster_stock') {
     $produitId = (int)($_POST['produit_id'] ?? 0);
-    $succId    = (int)($_POST['succursale_id'] ?? 0);
+    $succId    = $accesRestreint ? $succursaleStockId : (int)($_POST['succursale_id'] ?? 0);
     $type      = $_POST['type_ajust'] ?? 'Entrée';
     $quantite  = max(1, (int)($_POST['quantite'] ?? 0));
     $motif     = trim($_POST['motif'] ?? '');
@@ -92,7 +100,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'ajust
 }
 
 // --- Liste des succursales pour le filtre ---
-$succursales = $pdo->query("SELECT id, nom, code, type FROM succursales WHERE statut='Active' ORDER BY type='CENTRALE' DESC, nom")->fetchAll();
+if ($accesRestreint) {
+    $stmtSuccursales = $pdo->prepare("SELECT id, nom, code, type FROM succursales WHERE id = ? AND statut = 'Active'");
+    $stmtSuccursales->execute([$succursaleUtilisateurId]);
+    $succursales = $stmtSuccursales->fetchAll();
+} else {
+    $succursales = $pdo->query("SELECT id, nom, code, type FROM succursales WHERE statut='Active' ORDER BY type='CENTRALE' DESC, nom")->fetchAll();
+}
 
 // --- Construction de la requête stock ---
 $where = ["1=1"]; $params = [];
@@ -158,7 +172,7 @@ $lignes = $stmt->fetchAll();
 
 // --- Répartition par succursale pour chaque produit (vue générale) ---
 $repartition = [];
-if ($filtreSucc === 0 && $lignes) {
+if ($filtreSucc === 0 && !$accesRestreint && $lignes) {
     $ids = array_column($lignes, 'produit_id');
     $in  = implode(',', array_fill(0, count($ids), '?'));
     $stmtR = $pdo->prepare("
@@ -262,8 +276,10 @@ if ($filtreSucc > 0) {
                     </div>
                     <div>
                         <label class="mb-1 block text-xs font-semibold text-slate-500">Vue</label>
-                        <select name="succursale" onchange="this.form.submit()" class="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm">
-                            <option value="0">Stock général (centrale)</option>
+                        <select name="succursale" onchange="this.form.submit()" <?= $accesRestreint ? 'disabled' : '' ?> class="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm">
+                            <?php if (!$accesRestreint || $succursaleStockId === 0): ?>
+                                <option value="0" <?= $filtreSucc === 0 ? 'selected' : '' ?>>Stock général (centrale)</option>
+                            <?php endif; ?>
                             <?php foreach ($succursales as $s): ?>
                                 <option value="<?= (int)$s['id'] ?>" <?= $filtreSucc === (int)$s['id'] ? 'selected' : '' ?>>
                                     <?= h($s['nom']) ?> (<?= h($s['code']) ?>)
@@ -296,14 +312,14 @@ if ($filtreSucc > 0) {
                                 <th class="px-5 py-3 font-semibold">Quantité</th>
                                 <th class="px-5 py-3 font-semibold">Seuil</th>
                                 <th class="px-5 py-3 font-semibold">État</th>
-                                <?php if ($filtreSucc === 0): ?><th class="px-5 py-3 font-semibold">Répartition</th><?php endif; ?>
+                                <?php if ($filtreSucc === 0 && !$accesRestreint): ?><th class="px-5 py-3 font-semibold">Répartition</th><?php endif; ?>
                                 <th class="px-5 py-3 text-right font-semibold">Actions</th>
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-slate-100">
                         <?php if (empty($lignes)): ?>
                             <tr>
-                                <td colspan="<?= $filtreSucc === 0 ? 6 : 5 ?>" class="px-5 py-12 text-center">
+                                <td colspan="<?= $filtreSucc === 0 && !$accesRestreint ? 6 : 5 ?>" class="px-5 py-12 text-center">
                                     <div class="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-green-50 text-xl text-green-700">▣</div>
                                     <p class="mt-3 text-sm font-semibold text-slate-700">Aucun produit trouvé</p>
                                     <p class="mt-1 text-xs text-slate-400">Modifiez votre recherche ou changez de vue.</p>
@@ -338,7 +354,7 @@ if ($filtreSucc > 0) {
                                         <span class="rounded-full bg-green-50 px-2.5 py-1 text-xs font-semibold text-green-700">OK</span>
                                     <?php endif; ?>
                                 </td>
-                                <?php if ($filtreSucc === 0): ?>
+                                <?php if ($filtreSucc === 0 && !$accesRestreint): ?>
                                     <td class="px-5 py-4">
                                         <?php if (!empty($repartition[$l['produit_id']])): ?>
                                             <div class="flex flex-wrap gap-1">

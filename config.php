@@ -72,6 +72,60 @@ if (!function_exists('succursaleCourante')) {
     }
 }
 
+if (!function_exists('utilisateurEstLimiteAuPointDeVente')) {
+    function utilisateurEstLimiteAuPointDeVente(): bool {
+        return in_array($_SESSION['role'] ?? '', ['Caissier', 'Vendeur'], true);
+    }
+}
+
+if (!function_exists('succursaleUtilisateur')) {
+    function succursaleUtilisateur(): int {
+        if (empty($_SESSION['id_utilisateur'])) {
+            return 0;
+        }
+
+        global $pdo;
+        $stmt = $pdo->prepare('SELECT succursale_id FROM utilisateurs WHERE id = ?');
+        $stmt->execute([(int)$_SESSION['id_utilisateur']]);
+        $_SESSION['succursale_id'] = (int)($stmt->fetchColumn() ?: 0);
+
+        return $_SESSION['succursale_id'];
+    }
+}
+
+if (!function_exists('succursaleCentraleId')) {
+    function succursaleCentraleId(): int {
+        global $pdo;
+        static $id = null;
+        if ($id === null) {
+            $id = (int)($pdo->query("SELECT id FROM succursales WHERE type = 'CENTRALE' ORDER BY id LIMIT 1")->fetchColumn() ?: 0);
+        }
+
+        return $id;
+    }
+}
+
+if (!function_exists('exigerSuccursaleUtilisateur')) {
+    function exigerSuccursaleUtilisateur(): int {
+        $succursaleId = succursaleUtilisateur();
+        if ($succursaleId <= 0) {
+            http_response_code(403);
+            exit('Aucun point de vente n’est associé à ce compte. Contactez un administrateur.');
+        }
+
+        return $succursaleId;
+    }
+}
+
+if (!function_exists('exigerAccesAdministration')) {
+    function exigerAccesAdministration(): void {
+        if (utilisateurEstLimiteAuPointDeVente()) {
+            http_response_code(403);
+            exit('Accès réservé à l’administration.');
+        }
+    }
+}
+
 /** Numéro de document unique */
 if (!function_exists('numeroDocument')) {
     function numeroDocument(string $prefixe): string {

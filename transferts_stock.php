@@ -4,15 +4,19 @@ if (!isset($_SESSION['id_utilisateur'])) { header('Location: login.php'); exit; 
 
 $nomUtilisateur  = $_SESSION['nom'] ?? 'Administrateur';
 $roleUtilisateur = $_SESSION['role'] ?? 'Administrateur';
+$accesRestreint = utilisateurEstLimiteAuPointDeVente();
+$succursaleUtilisateurId = $accesRestreint ? exigerSuccursaleUtilisateur() : 0;
+$succursaleCentralePourUtilisateur = $accesRestreint && $succursaleUtilisateurId === succursaleCentraleId();
 $message = ''; $erreur = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'transferer') {
     $produitId = (int)($_POST['produit_id'] ?? 0);
-    $succId    = (int)($_POST['succursale_id'] ?? 0);
+    $succId    = $accesRestreint ? $succursaleUtilisateurId : (int)($_POST['succursale_id'] ?? 0);
     $quantite  = (int)($_POST['quantite'] ?? 0);
     $userId    = (int)($_SESSION['id_utilisateur'] ?? 0);
 
-    if ($produitId <= 0 || $succId <= 0 || $quantite <= 0) {
+    if ($produitId <= 0 || $succId <= 0 || $quantite <= 0
+        || ($accesRestreint && ($succursaleCentralePourUtilisateur || $succId !== $succursaleUtilisateurId))) {
         $erreur = 'Veuillez sélectionner un produit, une succursale et une quantité valide.';
     } else {
         try {
@@ -51,15 +55,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'trans
     }
 }
 
-$produits    = $pdo->query("SELECT p.id, p.nom_produit, COALESCE(s.quantite,0) AS qte FROM produits p LEFT JOIN stocks s ON s.produit_id=p.id ORDER BY p.nom_produit")->fetchAll();
-$succursales = $pdo->query("SELECT id, nom, code FROM succursales WHERE statut='Active' AND type != 'CENTRALE' ORDER BY nom")->fetchAll();
-$transferts  = $pdo->query("
+$produits = $pdo->query("SELECT p.id, p.nom_produit, COALESCE(s.quantite,0) AS qte FROM produits p LEFT JOIN stocks s ON s.produit_id=p.id ORDER BY p.nom_produit")->fetchAll();
+if ($accesRestreint) {
+    $stmtSuccursales = $pdo->prepare("SELECT id, nom, code FROM succursales WHERE id = ? AND statut = 'Active' AND type != 'CENTRALE'");
+    $stmtSuccursales->execute([$succursaleUtilisateurId]);
+    $succursales = $stmtSuccursales->fetchAll();
+    $stmtTransferts = $pdo->prepare("
+        SELECT t.*, p.nom_produit, s.nom AS succursale_nom
+        FROM transferts_stock t
+        INNER JOIN produits p ON p.id = t.produit_id
+        INNER JOIN succursales s ON s.id = t.succursale_dest_id
+        WHERE t.succursale_dest_id = ?
+        ORDER BY t.date_transfert DESC LIMIT 50
+    ");
+    $stmtTransferts->execute([$succursaleUtilisateurId]);
+    $transferts = $stmtTransferts->fetchAll();
+} else {
+    $succursales = $pdo->query("SELECT id, nom, code FROM succursales WHERE statut='Active' AND type != 'CENTRALE' ORDER BY nom")->fetchAll();
+    $transferts = $pdo->query("
     SELECT t.*, p.nom_produit, s.nom AS succursale_nom
     FROM transferts_stock t
     INNER JOIN produits p ON p.id = t.produit_id
     INNER JOIN succursales s ON s.id = t.succursale_dest_id
     ORDER BY t.date_transfert DESC LIMIT 50
-")->fetchAll();
+    ")->fetchAll();
+}
 ?>
 <!DOCTYPE html>
 <html lang="fr">
@@ -91,6 +111,7 @@ $transferts  = $pdo->query("
             <?php if ($erreur): ?><div class="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"><?= h($erreur) ?></div><?php endif; ?>
             <?php if ($message): ?><div class="mb-6 rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700"><?= h($message) ?></div><?php endif; ?>
 
+            <?php if (!$succursaleCentralePourUtilisateur): ?>
             <section class="mb-7 rounded-2xl border border-slate-100 bg-white p-5 shadow-sm">
                 <h2 class="font-bold text-slate-900 mb-4">Affecter du stock général vers une succursale</h2>
                 <form method="POST" class="grid grid-cols-1 gap-4 md:grid-cols-4">
@@ -122,6 +143,7 @@ $transferts  = $pdo->query("
                     </div>
                 </form>
             </section>
+            <?php endif; ?>
 
             <section class="overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-sm">
                 <div class="border-b border-slate-100 px-5 py-4 flex items-center justify-between">

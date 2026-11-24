@@ -8,6 +8,10 @@ if (!isset($_SESSION["id_utilisateur"])) {
     header("Location: login.php");
     exit;
 }
+if (in_array($_SESSION['role'] ?? '', ['Caissier', 'Vendeur'], true)) {
+    http_response_code(403);
+    exit('Accès réservé à l’administration.');
+}
 
 $nomUtilisateur = $_SESSION["nom"] ?? "Administrateur";
 $roleUtilisateur = $_SESSION["role"] ?? "Administrateur";

@@ -36,8 +36,9 @@ try {
         nom VARCHAR(100) NOT NULL,
         email VARCHAR(150) NOT NULL UNIQUE,
         mot_de_passe VARCHAR(255) NOT NULL,
-        role ENUM('Administrateur','Gestionnaire') NOT NULL DEFAULT 'Administrateur',
+        role ENUM('Administrateur','Gestionnaire','Caissier','Vendeur') NOT NULL DEFAULT 'Administrateur',
         statut ENUM('Actif','Inactif') NOT NULL DEFAULT 'Actif',
+        succursale_id INT NULL,
         date_creation TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     ) ENGINE=InnoDB";
 
@@ -167,7 +168,7 @@ try {
     }
 
     // Ajouter les colonnes de succursale aux bases déjà installées.
-    foreach (['commandes', 'mouvements_stock'] as $table) {
+    foreach (['commandes', 'mouvements_stock', 'utilisateurs'] as $table) {
         $verification = $pdo->prepare("
             SELECT COUNT(*)
             FROM information_schema.COLUMNS
@@ -180,6 +181,12 @@ try {
             $pdo->exec("ALTER TABLE `$table` ADD COLUMN succursale_id INT NULL");
         }
     }
+
+    $pdo->exec("
+        ALTER TABLE utilisateurs
+        MODIFY COLUMN role ENUM('Administrateur','Gestionnaire','Caissier','Vendeur')
+        NOT NULL DEFAULT 'Administrateur'
+    ");
 
     $message = "La base de données « ecommerce » et ses 9 tables ont été créées avec succès.";
 } catch (PDOException $e) {

@@ -10,6 +10,8 @@ if (!isset($_SESSION["id_utilisateur"])) {
 
 $nomUtilisateur = $_SESSION["nom"] ?? "Administrateur";
 $roleUtilisateur = $_SESSION["role"] ?? "Administrateur";
+$accesRestreint = utilisateurEstLimiteAuPointDeVente();
+$succursaleUtilisateurId = $accesRestreint ? exigerSuccursaleUtilisateur() : 0;
 
 $message = "";
 $typeMessage = "success";
@@ -78,18 +80,29 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         } else {
 
             try {
-                $update = $pdo->prepare("
-                    UPDATE commandes
-                    SET statut = ?
-                    WHERE id = ?
-                ");
+                if ($accesRestreint) {
+                    $verification = $pdo->prepare("SELECT COUNT(*) FROM commandes WHERE id = ? AND succursale_id = ?");
+                    $verification->execute([$idCommande, $succursaleUtilisateurId]);
+                    if ((int)$verification->fetchColumn() === 0) {
+                        $message = "Commande introuvable ou non accessible.";
+                        $typeMessage = "error";
+                    }
+                }
 
-                $update->execute([
-                    $nouveauStatut,
-                    $idCommande
-                ]);
-
-                $message = "Le statut de la commande a été modifié avec succès.";
+                if ($message === "") {
+                    $sqlUpdate = "
+                        UPDATE commandes
+                        SET statut = ?
+                        WHERE id = ?
+                    " . ($accesRestreint ? " AND succursale_id = ?" : "");
+                    $update = $pdo->prepare($sqlUpdate);
+                    $parametresUpdate = [$nouveauStatut, $idCommande];
+                    if ($accesRestreint) {
+                        $parametresUpdate[] = $succursaleUtilisateurId;
+                    }
+                    $update->execute($parametresUpdate);
+                    $message = "Le statut de la commande a été modifié avec succès.";
+                }
 
             } catch (PDOException $e) {
                 $message = "Erreur lors de la modification du statut.";
@@ -159,6 +172,11 @@ if (
     $params[] = $filtreStatut;
 }
 
+if ($accesRestreint) {
+    $sql .= " AND c.succursale_id = ?";
+    $params[] = $succursaleUtilisateurId;
+}
+
 $sql .= "
     GROUP BY
         c.id,
@@ -183,7 +201,7 @@ try {
     $commandes = $requete->fetchAll();
 
     // Statistiques générales
-    $statistiques = $pdo->query("
+    $sqlStatistiques = "
         SELECT
             COUNT(*) AS total,
             COALESCE(SUM(statut = 'En attente'), 0) AS attente,
@@ -197,7 +215,11 @@ try {
                 END
             ), 0) AS montant
         FROM commandes
-    ")->fetch();
+        " . ($accesRestreint ? "WHERE succursale_id = ?" : "") . "
+    ";
+    $stmtStatistiques = $pdo->prepare($sqlStatistiques);
+    $stmtStatistiques->execute($accesRestreint ? [$succursaleUtilisateurId] : []);
+    $statistiques = $stmtStatistiques->fetch();
 
 } catch (PDOException $e) {
 

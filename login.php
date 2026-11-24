@@ -66,7 +66,7 @@ try {
                 $message = "Veuillez saisir votre e-mail et votre mot de passe.";
             } else {
                 $stmt = $pdo->prepare(
-                    "SELECT id, nom, email, mot_de_passe, role, statut
+                    "SELECT id, nom, email, mot_de_passe, role, statut, succursale_id
                      FROM utilisateurs
                      WHERE email = ?
                      LIMIT 1"
@@ -84,6 +84,7 @@ try {
                     $_SESSION["id_utilisateur"] = (int) $compte["id"];
                     $_SESSION["nom"] = $compte["nom"];
                     $_SESSION["role"] = $compte["role"];
+                    $_SESSION["succursale_id"] = (int)($compte["succursale_id"] ?? 0);
 
                     header("Location: dashboard.php");
                     exit;

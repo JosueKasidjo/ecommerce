@@ -15,6 +15,8 @@ if (!$id) {
     header("Location: commandes.php");
     exit;
 }
+$accesRestreint = utilisateurEstLimiteAuPointDeVente();
+$succursaleUtilisateurId = $accesRestreint ? exigerSuccursaleUtilisateur() : 0;
 
 // Fonction de protection contre les injections HTML
 if (!function_exists("h")) {
@@ -37,15 +39,16 @@ try {
         FROM commandes c
         LEFT JOIN clients cl ON cl.id = c.client_id
         WHERE c.id = ?
+        " . ($accesRestreint ? "AND c.succursale_id = ?" : "") . "
         LIMIT 1
     ");
 
-    $requete->execute([$id]);
+    $requete->execute($accesRestreint ? [$id, $succursaleUtilisateurId] : [$id]);
     $commande = $requete->fetch(PDO::FETCH_ASSOC);
 
     if (!$commande) {
-        header("Location: commandes.php");
-        exit;
+        http_response_code(404);
+        exit("Commande introuvable.");
     }
 
     // Produits de la commande
